@@ -2,14 +2,18 @@ from django.shortcuts import render
 from bson.objectid import ObjectId 
 # Create your views here.
 from django.http import JsonResponse
-from .utils import extract_mongo_schema, generate_explanations_with_llama, save_explanations_to_mongodb , get_database_explanation, generate_query, execute_query,refine_output
+from .utils import extract_mongo_schema, generate_explanations_with_llama, save_explanations_to_mongodb , get_database_explanation, generate_query, execute_query,refine_output, all_databases, check_database_exists, store_chat
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 import json
 
+@csrf_exempt
 def list_databases(request):
-    # Logic to list user databases
-    return JsonResponse({'databases': []})
+    try:
+        db_list = all_databases()
+        return JsonResponse({'databases': db_list})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
 def add_database(request):
@@ -29,16 +33,20 @@ def add_database(request):
         # Fallback to form data if JSON parsing fails
         db_uri = request.POST.get('db_uri')
         db_name = request.POST.get('db_name')
-    
+
+    print(db_name)
     # Validate inputs
     if not db_uri or not db_name:
         return JsonResponse({"error": "db_uri and db_name are required"}, status=400)
     
     # Ensure db_name is a string
     db_name = str(db_name)
+    if check_database_exists(db_name):
+        return JsonResponse({"error": f"Database '{db_name}' already exists."}, status=400)
 
     try:
         user_id = request.user.id
+        
         schema_data = extract_mongo_schema(db_uri, db_name)
         
      
@@ -89,22 +97,43 @@ def chat_with_database(request):
     else:
         return JsonResponse({"success": False, "error": "Invalid request method"})
 
+@csrf_exempt
+def fetch_explanations(request):
+    """
+    Fetch explanations for a given database name.
 
-def fetch_explanations(request, db_name):
-    user_id = request.user.id  # Assuming user authentication is set up
+    Expects:
+        - database_name (str): The name of the database to fetch explanations for.
 
-    explanations = list(EXPLANATIONS_COLLECTION.find(
-        {"user_id": user_id, "db_name": db_name},
-        {"_id": 1, "schema": 1, "explanation": 1, "is_finalized": 1}  # Return these fields
-    ))
-    
-    # Convert ObjectId to string for JSON serialization
-    for explanation in explanations:
-        explanation["_id"] = str(explanation["_id"])
+    Returns:
+        JsonResponse: The explanations for the given database or an error message.
+    """
+    if request.method == "POST":
+        try:
+            # Parse JSON data from the request body
+            data = json.loads(request.body)
+            database_name = data.get('database_name')
 
-    return JsonResponse({"explanations": explanations})
+            # Validate input
+            if not database_name:
+                return JsonResponse({"error": "database_name is required"}, status=400)
 
-   
+            # Fetch explanations using the provided database name
+            explanation = get_database_explanation(database_name)
+            if "_id" in explanation and isinstance(explanation["_id"], ObjectId):
+                explanation["_id"] = str(explanation["_id"])
+
+            return JsonResponse({"explanations": explanation})
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON data"}, status=400)
+        except ValueError as e:
+            return JsonResponse({"error": str(e)}, status=404)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Invalid request method. Only POST is allowed."}, status=405)
+
+@csrf_exempt  
 def update_explanation(request, explanation_id):
     if request.method == "POST":
         new_explanation = request.POST.get('explanation')
@@ -118,3 +147,40 @@ def update_explanation(request, explanation_id):
 
     return JsonResponse({"error": "Invalid request method."}, status=400)
 
+@csrf_exempt
+def store_chat_view(request):
+    """
+    View to store chat data into the 'chats' collection in MongoDB.
+
+    Expects:
+        - chat_id (str): Unique identifier for the chat session.
+        - query (str, optional): The user's query.
+        - response (str, optional): The LLM's response.
+
+    Returns:
+        JsonResponse: Success or error message.
+    """
+    if request.method == "POST":
+        try:
+            # Parse JSON data from the request
+            data = json.loads(request.body)
+            chat_id = data.get('chat_id')
+            query = data.get('query')
+            response = data.get('response')
+
+            # Validate inputs
+            if not chat_id:
+                return JsonResponse({"error": "chat_id is required"}, status=400)
+
+            # Call the store_chat function from utils.py
+            result = store_chat(chat_id=chat_id, query=query, response=response)
+
+            return JsonResponse(result)
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON data"}, status=400)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Invalid request method. Only POST is allowed."}, status=405)
+
+    
