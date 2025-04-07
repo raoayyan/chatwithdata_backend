@@ -9,6 +9,7 @@ import json
 import bcrypt
 import jwt
 from datetime import datetime, timedelta
+from .utils import update_explanation_text
 
 
 SECRET_KEY = "432874u5872"
@@ -145,13 +146,16 @@ def fetch_explanations(request):
 def update_explanation(request, explanation_id):
     if request.method == "POST":
         new_explanation = request.POST.get('explanation')
+        
+        if not new_explanation:
+            return JsonResponse({"error": "Explanation text is required."}, status=400)
 
-        EXPLANATIONS_COLLECTION.update_one(
-            {"_id": ObjectId(explanation_id)},  # Convert to ObjectId
-            {"$set": {"explanation": new_explanation}}
-        )
+        updated = update_explanation_text(explanation_id, new_explanation)
 
-        return JsonResponse({"message": "Explanation updated successfully!"})
+        if updated:
+            return JsonResponse({"message": "Explanation updated successfully!"})
+        else:
+            return JsonResponse({"error": "Failed to update explanation."}, status=500)
 
     return JsonResponse({"error": "Invalid request method."}, status=400)
 
