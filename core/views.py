@@ -2,10 +2,18 @@ from django.shortcuts import render
 from bson.objectid import ObjectId 
 # Create your views here.
 from django.http import JsonResponse
-from .utils import extract_mongo_schema, generate_explanations_with_llama, save_explanations_to_mongodb , get_database_explanation, generate_query, execute_query,refine_output, all_databases, check_database_exists, store_chat
+from .utils import extract_mongo_schema, generate_explanations_with_llama, save_explanations_to_mongodb , get_database_explanation, generate_query, execute_query,refine_output, all_databases, check_database_exists, store_chat, signup, sign_in
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 import json
+import bcrypt
+import jwt
+from datetime import datetime, timedelta
+
+
+SECRET_KEY = "432874u5872"
+
+
 
 @csrf_exempt
 def list_databases(request):
@@ -113,7 +121,7 @@ def fetch_explanations(request):
             # Parse JSON data from the request body
             data = json.loads(request.body)
             database_name = data.get('database_name')
-
+            print("This is database name from request body: ", database_name)
             # Validate input
             if not database_name:
                 return JsonResponse({"error": "database_name is required"}, status=400)
@@ -167,7 +175,9 @@ def store_chat_view(request):
             chat_id = data.get('chat_id')
             query = data.get('query')
             response = data.get('response')
-
+            print("chat_id:", chat_id)
+            print("query:", query)
+            print("response:", response)
             # Validate inputs
             if not chat_id:
                 return JsonResponse({"error": "chat_id is required"}, status=400)
@@ -183,4 +193,64 @@ def store_chat_view(request):
     else:
         return JsonResponse({"error": "Invalid request method. Only POST is allowed."}, status=405)
 
-    
+@csrf_exempt
+def signup_view(request):
+    """
+    Handles user registration/signup.
+    """
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            name = data.get('name')
+            email = data.get('email')
+            password = data.get('password')
+
+            # Validate inputs
+            if not all([name, email, password]):
+                return JsonResponse({"error": "Name, email and password are required"}, status=400)
+
+            # Call the signup function
+            result = signup(name=name, email=email, password=password)
+
+            if "error" in result:
+                return JsonResponse(result, status=400)
+            
+            return JsonResponse(result, status=201)  # 201 Created
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON data"}, status=400)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Only POST method is allowed"}, status=405)
+
+@csrf_exempt
+def sign_in_view(request):
+    """
+    Handles user authentication/sign-in.
+    Returns a JWT token if successful.
+    """
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            email = data.get('email')
+            password = data.get('password')
+
+            # Validate inputs
+            if not all([email, password]):
+                return JsonResponse({"error": "Email and password are required"}, status=400)
+
+            # Call the sign_in function
+            result = sign_in(email=email, password=password)
+
+            if "error" in result:
+                return JsonResponse(result, status=401)  # 401 Unauthorized
+            
+            return JsonResponse(result)
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON data"}, status=400)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Only POST method is allowed"}, status=405)

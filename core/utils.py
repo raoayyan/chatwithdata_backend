@@ -9,6 +9,11 @@ from pymongo.errors import PyMongoError
 import json
 import re
 from typing import Union
+import bcrypt
+import jwt
+from datetime import datetime, timedelta
+
+SECRET_KEY = "432874u5872"
 
 
 def verify_db_connection():
@@ -429,4 +434,79 @@ def store_chat(chat_id: str, query: str = None, response: str = None):
 
     except Exception as e:
         print(f"Error storing chat: {str(e)}")
+        return {"error": str(e)}
+
+def signup(name: str, email: str, password: str):
+    """
+    Signs up a new user by storing their details in the 'users' collection.
+
+    Args:
+        name (str): The name of the user.
+        email (str): The email of the user.
+        password (str): The plain-text password of the user.
+
+    Returns:
+        dict: A success message or error message.
+    """
+    try:
+        users_collection = DB["users"]
+
+        # Check if the email already exists
+        if users_collection.find_one({"email": email}):
+            return {"error": "Email already exists"}
+
+        # Hash the password
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+
+        # Create the user document
+        user = {
+            "name": name,
+            "email": email,
+            "password": hashed_password.decode('utf-8')  # Store the hashed password as a string
+        }
+
+        # Insert the user into the database
+        users_collection.insert_one(user)
+
+        return {"message": "User signed up successfully!"}
+
+    except Exception as e:
+        print(f"Error during signup: {str(e)}")
+        return {"error": str(e)}
+
+def sign_in(email: str, password: str):
+    """
+    Signs in a user by verifying their email and password.
+
+    Args:
+        email (str): The email of the user.
+        password (str): The plain-text password of the user.
+
+    Returns:
+        dict: A success message with a token or an error message.
+    """
+    try:
+        users_collection = DB["users"]
+
+        # Find the user by email
+        user = users_collection.find_one({"email": email})
+        if not user:
+            return {"error": "Invalid email or password"}
+
+        # Verify the password
+        if not bcrypt.checkpw(password.encode('utf-8'), user["password"].encode('utf-8')):
+            return {"error": "Invalid email or password"}
+
+        # Generate a token
+        payload = {
+            "user_id": str(user["_id"]),
+            "email": user["email"],
+            "exp": datetime.utcnow() + timedelta(hours=24)  # Token expires in 24 hours
+        }
+        token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+        return {"message": "Sign-in successful", "token": token}
+
+    except Exception as e:
+        print(f"Error during sign-in: {str(e)}")
         return {"error": str(e)}
