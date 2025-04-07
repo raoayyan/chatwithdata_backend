@@ -1,14 +1,11 @@
 from pathlib import Path
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
 SECRET_KEY = 'django-insecure-$&b_@3vxke%r#r4wfe0w1u_0n(yd!f6if$1r0&zjy0z@u8f@!v'
 DEBUG = True
 ALLOWED_HOSTS = []
 
-# Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -18,20 +15,20 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'core',
     'rest_framework',
-    'djongo',
     'corsheaders',
+    
+    # 'djongo',  # ❌ Mongo support removed (commented)
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
 ]
 
 CSRF_COOKIE_HTTPONLY = False
@@ -58,25 +55,36 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
-# Database settings: MongoDB (default) and PostgreSQL (alias: 'postgres')
+# --- ✅ ONLY USING POSTGRES ---
 DATABASES = {
     'default': {
-        'ENGINE': 'djongo',
-        'NAME': 'chatwithdata',
-        'HOST': 'mongodb://localhost',
-        'PORT': 27017,
-    },
-    'postgres': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'dvdrental',
         'USER': 'postgres',
         'PASSWORD': 'Faisal',
         'HOST': 'localhost',
-        'PORT': '5432',
+        'PORT': '5433',
     }
 }
 
-# Password validation
+# --- ❌ PREVIOUS MONGODB CONFIG (commented out) ---
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'djongo',
+#         'NAME': 'chatwithdata',
+#         'HOST': 'mongodb://localhost',
+#         'PORT': 27017,
+#     },
+#     'postgres': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'dvdrental',
+#         'USER': 'postgres',
+#         'PASSWORD': 'Faisal',
+#         'HOST': 'localhost',
+#         'PORT': '5433',
+#     }
+# }
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -92,14 +100,10 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static files
 STATIC_URL = 'static/'
-
-# Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
