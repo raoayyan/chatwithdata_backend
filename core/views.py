@@ -1,6 +1,5 @@
 from django.shortcuts import render
 from bson.objectid import ObjectId 
-# Create your views here.
 from django.http import JsonResponse
 # from .utils import extract_mongo_schema, generate_explanations_with_llama, save_explanations_to_mongodb , get_database_explanation, generate_query, execute_query,refine_output, all_databases, check_database_exists,save_sql_explanations_to_mongodb ,store_chat, signup, sign_in
 from .utils import (
@@ -22,7 +21,6 @@ from .utils import (
     save_sql_explanations_to_mongodb,
     sign_in,
 )
-
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 import json
