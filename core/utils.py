@@ -12,6 +12,7 @@ from typing import Union
 import bcrypt
 import jwt
 from datetime import datetime, timedelta
+import psycopg
 
 SECRET_KEY = "432874u5872"
 
@@ -475,6 +476,7 @@ def signup(name: str, email: str, password: str):
         return {"error": str(e)}
 
 def sign_in(email: str, password: str):
+
     """
     Signs in a user by verifying their email and password.
 
@@ -510,3 +512,88 @@ def sign_in(email: str, password: str):
     except Exception as e:
         print(f"Error during sign-in: {str(e)}")
         return {"error": str(e)}
+    
+def save_sql_explanations_to_mongodb(user_id, db_name, explanations):
+    """
+    Saves PostgreSQL schema + sample + explanation to MongoDB (same as MongoDB schemas).
+    """
+    explanation_doc = {
+        "user_id": user_id,
+        "db_name": db_name,
+        "is_finalized": False,
+        "schemas": []
+    }
+
+    for entry in explanations:
+        explanation_doc["schemas"].append({
+            "schema": entry["schema"],
+            "samples": entry["samples"],
+            "explanation": entry.get("explanation", "")
+        })
+
+    EXPLANATIONS_COLLECTION.insert_one(explanation_doc)
+
+
+def extract_sql_schema():
+    """
+    Connects to PostgreSQL and extracts schema for all public tables.
+    Returns table name, fields, and 2 sample rows.
+    """
+    conn = psycopg.connect(
+        dbname="dvdrental",
+        user="postgres",
+        password="Faisal",
+        host="localhost",
+        port="5433"
+    )
+    cur = conn.cursor()
+
+    schema_data = []
+    cur.execute("""
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema='public' AND table_type='BASE TABLE';
+    """)
+    tables = cur.fetchall()
+
+    for table in tables:
+        table_name = table[0]
+        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+        columns = [row[0] for row in cur.fetchall()]
+        
+        cur.execute(f"SELECT * FROM {table_name} LIMIT 2;")
+        samples = cur.fetchall()
+
+        schema_data.append({
+            "schema": {
+                "table": table_name,
+                "fields": columns
+            },
+            "samples": samples
+        })
+
+    cur.close()
+    conn.close()
+    return schema_data
+
+def generate_sql_query(user_query, explanation):
+    # This would translate natural language to SQL query (needs LLM integration)
+    pass
+
+def execute_sql_query(query):
+    try:
+        conn = psycopg.connect(
+            dbname="dvdrental",
+            user="postgres",
+            password="Faisal",
+            host="localhost",
+            port="5433"
+        )
+        cur = conn.cursor()
+        cur.execute(query)
+        result = cur.fetchall()
+        cur.close()
+        conn.close()
+        return result
+    except Exception as e:
+        return str(e)
+
