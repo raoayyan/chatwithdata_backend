@@ -12,6 +12,9 @@ from typing import Union
 import bcrypt
 import jwt
 from datetime import datetime, timedelta
+from bson.objectid import ObjectId 
+from groq import Groq
+import psycopg
 
 SECRET_KEY = "432874u5872"
 
@@ -40,19 +43,28 @@ llm = ChatGroq(
     
     )
 
+# Initialize the Groq client
+client = Groq(
+    api_key=os.environ.get("GROQ_API_KEY"),
+)
 
 def all_databases():
     """
-    Retrieves all unique 'db_name' values from the 'db-explanation' collection.
+    Retrieves all unique 'db_name' and their corresponding 'db_type' values 
+    from the 'db-explanation' collection.
 
     Returns:
-        List[Dict[str, str]]: List of unique database names in {'db_name': value} format.
+        List[Dict[str, str]]: List of unique database names and types in 
+        {'db_name': value, 'db_type': value} format.
     """
     try:
-        db_names = EXPLANATIONS_COLLECTION.distinct("db_name")
-        return [{"db_name": name} for name in db_names if name]  # Filter out null/None if any
+        # Retrieve all documents with db_name and db_type
+        databases = EXPLANATIONS_COLLECTION.find({}, {"db_name": 1, "db_type": 1, "_id": 0})
+        
+        # Filter out documents without db_name or db_type and return the result
+        return [{"db_name": db.get("db_name"), "db_type": db.get("db_type")} for db in databases if db.get("db_name") and db.get("db_type")]
     except Exception as e:
-        raise RuntimeError(f"Failed to fetch db_name values: {str(e)}")
+        raise RuntimeError(f"Failed to fetch database values: {str(e)}")
 
 def check_database_exists(database_name: str) -> bool:
     """
@@ -73,19 +85,6 @@ def check_database_exists(database_name: str) -> bool:
         print(f"Error while checking database existence: {str(e)}")
         return False
 
-# ffor simple 1level schema extraction but providing sample it will get all the sense of data in nested
-# def extract_mongo_schema(db_uri, db_name):
-#     client = MongoClient(db_uri)
-#     db = client[db_name]
-#     schema_data = []
-
-#     for collection_name in db.list_collection_names():
-#         collection = db[collection_name]
-#         samples = list(collection.find().limit(2))  # Fetch 2 sample documents
-#         schema = {"collection": collection_name, "fields": list(samples[0].keys()) if samples else []}
-#         schema_data.append({"schema": schema, "samples": samples})
-
-#     return schema_data
 
 def extract_mongo_schema(db_uri, db_name):
     client = MongoClient(db_uri)
@@ -130,34 +129,6 @@ def extract_mongo_schema(db_uri, db_name):
 
     return schema_data
 
-# import sqlite3
-
-# def extract_sql_schema(db_path):
-#     connection = sqlite3.connect(db_path)
-#     cursor = connection.cursor()
-
-#     schema_data = []
-#     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-#     tables = cursor.fetchall()
-
-#     for table in tables:
-#         table_name = table[0]
-#         cursor.execute(f"PRAGMA table_info({table_name});")
-#         columns = [row[1] for row in cursor.fetchall()]
-        
-#         cursor.execute(f"SELECT * FROM {table_name} LIMIT 2;")
-#         samples = cursor.fetchall()
-
-#         schema_data.append({"table": table_name, "fields": columns, "samples": samples})
-
-#     return schema_data
-
-from groq import Groq
-
-# Initialize the Groq client
-client = Groq(
-    api_key=os.environ.get("GROQ_API_KEY"),
-)
 
 def generate_explanations_with_llama(schema_data):
     explanations = []
@@ -169,12 +140,12 @@ def generate_explanations_with_llama(schema_data):
         # Construct the prompt
         prompt = (
             f"Given the schema: {schema} and the following sample data: {samples}, "
-            "write a short explanation of what this table or collection represents.original schema may contain short form like e_name for employee name e_no employee number. you  have to explain each using your best knowledge and by looking at sample data. and  if there is some nested schemas do explain them also "
+            "write a short explanation of what this table or collection represents.original schema may contain short form like e_name for employee name e_no employee number. you  have to explain each using your best knowledge and by looking at sample data. and  if there is some nested schemas do explain them also. Remember please generate shortt and concise explanation to the point "
         )
 
         # Groq API call
         completion = client.chat.completions.create(
-            model="deepseek-r1-distill-llama-70b",
+            model="llama-3.3-70b-versatile",
             messages=[{"role": "system", "content": prompt}],
             temperature=0.5,
             max_tokens=1024,
@@ -191,10 +162,10 @@ def generate_explanations_with_llama(schema_data):
 
     return explanations
 
-def save_explanations_to_mongodb(user_id, db_name, explanations):
+def save_explanations_to_mongodb(db_type, db_name, explanations):
     # Prepare the document with user_id and db_name
     explanation_doc = {
-        "user_id": user_id,
+        "db_type": db_type,
         "db_name": db_name,
         "is_finalized": False,
         "schemas": []  # This will be an array to store multiple schemas
@@ -397,7 +368,7 @@ def refine_output(user_query, query_result):
     # Extract the content from the LLM response
     return refined_response.content
 
-def store_chat(chat_id: str, query: str = None, response: str = None):
+def store_chat(chat_id: str, db_name: str, query: str = None, response: str = None):
     """
     Stores chat data into the 'chats' collection in MongoDB.
     """
@@ -410,6 +381,7 @@ def store_chat(chat_id: str, query: str = None, response: str = None):
             {
                 "$setOnInsert": {
                     "chat_id": chat_id,
+                    "db_name": db_name,
                     "queries": [],
                     "responses": []
                 }
@@ -510,3 +482,195 @@ def sign_in(email: str, password: str):
     except Exception as e:
         print(f"Error during sign-in: {str(e)}")
         return {"error": str(e)}
+    
+def get_chat(db_name: str):
+    """
+    Retrieves all chats for a given database name from the 'chats' collection.
+
+    Args:
+        db_name (str): The name of the database to filter chats.
+
+    Returns:
+        dict: A success message with the list of chats or an error message.
+    """
+    try:
+        chats_collection = DB["chats"]
+
+        # Find all chats with the given db_name
+        chats = list(chats_collection.find({"db_name": db_name}))
+
+        # Convert ObjectId to string for JSON serialization
+        for chat in chats:
+            if "_id" in chat and isinstance(chat["_id"], ObjectId):
+                chat["_id"] = str(chat["_id"])
+
+        return {"message": "Chats retrieved successfully!", "chats": chats}
+
+    except Exception as e:
+        print(f"Error retrieving chats: {str(e)}")
+        return {"error": str(e)}
+
+def extract_sql_schema(db_name):
+    """
+    Connects to PostgreSQL and extracts schema for all public tables.
+    Returns table name, fields, and 2 sample rows.
+    """
+    conn = psycopg.connect(
+        dbname=db_name,
+        user="postgres",
+        password="postgres@11",
+        host="localhost",
+        port="5432"
+    )
+    cur = conn.cursor()
+
+    schema_data = []
+    cur.execute("""
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema='public' AND table_type='BASE TABLE';
+    """)
+    tables = cur.fetchall()
+
+    for table in tables:
+        table_name = table[0]
+        cur.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}';")
+        columns = [row[0] for row in cur.fetchall()]
+        
+        cur.execute(f"SELECT * FROM {table_name} LIMIT 2;")
+        samples = cur.fetchall()
+
+        schema_data.append({
+            "schema": {
+                "table": table_name,
+                "fields": columns
+            },
+            "samples": samples
+        })
+
+    cur.close()
+    conn.close()
+    return schema_data
+
+def generate_sql_query(user_query: str, explanation: str):
+    """
+    Generate a PostgreSQL query from natural language using LLM.
+    
+    Args:
+        user_query (str): Natural language query
+        explanation (str): Database schema explanation
+        
+    Returns:
+        str: Generated SQL query
+    """
+    prompt = ChatPromptTemplate.from_messages([
+        HumanMessagePromptTemplate.from_template("""
+            Using the following database explanation:
+            {explanation}
+
+            You have all the data, including database name, tables, and their full schemas. 
+            Generate an accurate PostgreSQL query for the following user query written in English:
+            {user_query}
+
+            ### Instructions:
+            1. Ensure the query strictly adheres to the schema provided in the explanation.
+            2. Use proper SQL syntax for PostgreSQL.
+            3. Include all necessary JOINs, WHERE clauses, and GROUP BY as needed.
+            4. **Do not output any text other than the SQL query.**
+            5. Only output a valid PostgreSQL query and nothing else!
+            6. Do not include any markdown formatting or backticks.
+            7. Do not include any comments or explanations.
+
+            ### Example:
+            User query: Find the names of all customers whose order total amount is greater than 30.
+
+            Output:
+            SELECT c.name 
+            FROM customers c
+            JOIN orders o ON c.id = o.customer_id
+            WHERE o.total_amount > 30;
+
+            Query: all those customers name whose have not placed any order
+            SELECT c.name
+            FROM customers c
+            LEFT JOIN orders o ON c.id = o.customer_id
+            WHERE o.id IS NULL;
+
+            Now process the following:
+            """)
+    ])
+    
+    # Combine prompt and LLM into a sequence
+    chain = prompt | llm
+
+    # Use `invoke` instead of `run`
+    response = chain.invoke({"explanation": explanation, "user_query": user_query})
+    print("response of query generation:", response)
+    return response
+
+def execute_sql_query(db_name: str, query: Union[str, object]):
+    """
+    Execute a PostgreSQL query generated by an LLM or passed directly as a string.
+
+    Args:
+        db_name (str): Name of the PostgreSQL database.
+        query (Union[str, object]): Query string or object containing SQL syntax.
+
+    Returns:
+        list or int: Query result.
+
+    Raises:
+        ValueError: If the query format is invalid or execution fails.
+    """
+    try:
+        # Extract query content if needed
+        if hasattr(query, "content"):
+            query = query.content
+
+        print("Query received:", query)
+
+        if not isinstance(query, str):
+            raise ValueError("Query must be a string.")
+
+        # Basic validation to prevent obvious SQL injection
+        forbidden_keywords = ['DROP', 'TRUNCATE', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'GRANT']
+        if any(keyword in query.upper() for keyword in forbidden_keywords):
+            raise ValueError("Query contains forbidden operations.")
+
+        # Connect to PostgreSQL
+        conn = psycopg.connect(
+            dbname=db_name,
+            user="postgres",
+            password="postgres@11",
+            host="localhost",
+            port="5432"
+        )
+        
+        with conn.cursor() as cur:
+            try:
+                cur.execute(query)
+                
+                # For SELECT queries, fetch results
+                if query.strip().upper().startswith('SELECT'):
+                    result = cur.fetchall()
+                    # Get column names
+                    colnames = [desc[0] for desc in cur.description]
+                    result = [dict(zip(colnames, row)) for row in result]
+                else:
+                    # For other queries, return rowcount
+                    result = cur.rowcount
+                    conn.commit()
+                
+                print("Query Execution Result:", result)
+                return result
+                
+            except Exception as e:
+                conn.rollback()
+                raise ValueError(f"Error executing query: {str(e)}")
+            finally:
+                conn.close()
+
+    except psycopg.Error as e:
+        raise ValueError(f"PostgreSQL error: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Error: {str(e)}")
+
